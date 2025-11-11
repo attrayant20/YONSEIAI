@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>오렌지 테트리스</title>
+  <style>
+    body { 
+      background: #262626; 
+      display: flex; justify-content: center; align-items: center; 
+      height: 100vh; margin: 0;
+      font-family: '맑은 고딕', 'Malgun Gothic', Arial, sans-serif;
+    }
+    .container { 
+      display: flex;
+      background: #191919;
+      border-radius: 16px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+      overflow: hidden;
+    }
+    #tetris {
+      background: #131313;
+      border-right: 2px solid #444;
+      display: block;
+    }
+    .side-panel {
+      min-width: 180px;
+      padding: 36px 20px 0 20px;
+      background: #222;
+      color: #fff7e0;
+      display: flex;
+      flex-direction: column;
+      align-items: start;
+    }
+    .label {
+      font-size: 18px; margin-bottom: 6px; font-weight: bold; color: #ff9800;
+    }
+    .value-box {
+      font-size: 32px;
+      font-weight: bold;
+      margin-bottom: 32px;
+      color: #ffda75;
+      text-shadow: 0 2px 8px #ffae0077;
+      padding-left: 4px;
+    }
+    .side-panel hr {
+      border: none;
+      border-bottom: 1.5px solid #ff980060;
+      width: 100%;
+      margin: 16px 0 28px 0;
+    }
+    .side-panel p {
+      color: #ffa726a9;
+      font-size: 13px;
+      margin: 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <canvas id="tetris" width="240" height="400"></canvas>
+    <div class="side-panel">
+      <span class="label">점수</span>
+      <div id="score" class="value-box">0</div>
+      <hr>
+      <span class="label">레벨</span>
+      <div id="level" class="value-box">1</div>
+      <hr>
+      <p>⇦⇨ 방향키: 이동<br>
+         ↑: 회전, ↓: 빠른 낙하<br>
+         한 줄 클리어 시 +10점</p>
+    </div>
+  </div>
+  <script>
+    const canvas = document.getElementById('tetris');
+    const context = canvas.getContext('2d');
+    context.scale(20, 20); // 각 블록 크기
+
+    const ROWS = 20, COLS = 12;
+    const arena = Array.from({length: ROWS}, () => Array(COLS).fill(0));
+
+    // 모두 오렌지 계열 색을 지정
+    const orangePalette = [
+      null,
+      '#ff8000', // 진한 오렌지
+      '#ffa040', // 연한 오렌지
+      '#ffd180', // 밝은 살구
+      '#ffb84d', // 중간 오렌지
+      '#ff9300', // 강한 오렌지
+      '#ffaf73', // 연오렌지
+      '#ff5700', // 다홍, 주황
+    ];
+
+    const tetrominoes = {
+      'T': [[0,1,0],[1,1,1],[0,0,0]],
+      'O': [[2,2],[2,2]],
+      'L': [[0,0,3],[3,3,3],[0,0,0]],
+      'J': [[4,0,0],[4,4,4],[0,0,0]],
+      'I': [[0,5,0,0],[0,5,0,0],[0,5,0,0],[0,5,0,0]],
+      'S': [[0,6,6],[6,6,0],[0,0,0]],
+      'Z': [[7,7,0],[0,7,7],[0,0,0]]
+    };
+
+    function drawMatrix(matrix, offset) {
+      matrix.forEach((row, y) => row.forEach((val, x) => {
+        if (val) {
+          context.fillStyle = orangePalette[val];
+          context.fillRect(x + offset.x, y + offset.y, 1, 1);
+          context.strokeStyle = "#fff1";
+          context.strokeRect(x + offset.x, y + offset.y, 1, 1);
+        }
+      }));
+    }
+
+    function merge(arena, player) {
+      player.matrix.forEach((row, y) => {
+        row.forEach((value, x) => {
+          if (value) {
+            arena[y + player.pos.y][x + player.pos.x] = value;
+          }
+        });
+      });
+    }
+    function collide(arena, player) {
+      const {matrix, pos} = player;
+      return matrix.some((row, y) => row.some((value, x) =>
+        value && (arena[y + pos.y] && arena[y + pos.y][x + pos.x]) !== 0));
+    }
+    function rotate(matrix, dir) {
+      for (let y = 0; y < matrix.length; y++) {
+        for (let x = 0; x < y; x++) {
+          [matrix[x][y], matrix[y][x]] = [matrix[y][x], matrix[x][y]];
+        }
+      }
+      if (dir > 0) matrix.forEach(row => row.reverse());
+      else matrix.reverse();
+    }
+
+    function playerDrop() {
+      player.pos.y++;
+      if (collide(arena, player)) {
+        player.pos.y--;
+        merge(arena, player);
+        const cleared = arenaSweep();
+        player.linesCleared += cleared;
+        player.score += cleared * 10;
+        if (cleared > 0) updateLevel();
+        playerReset();
+        updatePanel();
+      }
+      dropCounter = 0;
+    }
+    function playerMove(dir) {
+      player.pos.x += dir;
+      if (collide(arena, player)) player.pos.x -= dir;
+    }
+
+    function playerReset() {
+      const keys = Object.keys(tetrominoes);
+      player.matrix = tetromino(tetrominoes[keys[(Math.random()*keys.length)|0]]);
+      player.pos.y = 0;
+      player.pos.x = (COLS/2|0) - (player.matrix[0].length/2|0);
+      if (collide(arena, player)) {
+        // 게임 오버, 모두 초기화
+        for(let row of arena) row.fill(0);
+        player.score = 0;
+        player.linesCleared = 0;
+        player.level = 1;
+        dropInterval = 800;
+      }
+    }
+    function playerRotate(dir) {
+      const pos = player.pos.x;
+      let offset = 1;
+      rotate(player.matrix, dir);
+      while (collide(arena, player)) {
+        player.pos.x += offset;
+        offset = -(offset + (offset > 0 ? 1 : -1));
+        if (offset > player.matrix[0].length) {
+          rotate(player.matrix, -dir);
+          player.pos.x = pos;
+          break;
+        }
+      }
+    }
+
+    function arenaSweep() {
+      let cleared = 0;
+      for (let y = arena.length - 1; y >= 0; y--) {
+        if (arena[y].every(val => val !== 0)) {
+          arena.splice(y, 1);
+          arena.unshift(Array(COLS).fill(0));
+          cleared++;
+          y++; // 같은 y행 다시 검사
+        }
+      }
+      return cleared; // 지운 줄 개수 반환
+    }
+
+    function draw() {
+      context.fillStyle = '#131313';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      drawMatrix(arena, {x:0, y:0});
+      drawMatrix(player.matrix, player.pos);
+    }
+
+    function update(time = 0) {
+      const delta = time - lastTime;
+      dropCounter += delta;
+      if (dropCounter > dropInterval) playerDrop();
+      lastTime = time;
+      draw();
+      requestAnimationFrame(update);
+    }
+
+    function updatePanel() {
+      document.getElementById('score').innerText = player.score;
+      document.getElementById('level').innerText = player.level;
+    }
+
+    function updateLevel() {
+      // 10줄마다 레벨 상승, dropInterval이 더 빨라짐
+      player.level = Math.floor(player.linesCleared / 10) + 1;
+      // 기본: 800ms, 레벨1 추가당 50ms씩 감소, 하한선 150
+      dropInterval = Math.max(800 - (player.level-1)*50, 150);
+    }
+
+    function tetromino(shape) {
+      // 숫자로 변환
+      return shape.map(row => row.map(val => val ? val : 0));
+    }
+
+    let dropCounter = 0, dropInterval = 800, lastTime = 0;
+    let player = { pos: {x:0, y:0}, matrix: null, score:0, level:1, linesCleared: 0 };
+    document.addEventListener('keydown', e => {
+      if (e.key === 'ArrowLeft') playerMove(-1);
+      else if (e.key === 'ArrowRight') playerMove(1);
+      else if (e.key === 'ArrowDown') playerDrop();
+      else if (e.key === 'ArrowUp') playerRotate(1);
+    });
+
+    playerReset();
+    updatePanel();
+    update();
+  </script>
+</body>
+</html>
